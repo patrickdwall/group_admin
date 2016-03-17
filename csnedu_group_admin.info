@@ -1,0 +1,6 @@
+name = Group Admin Module
+description = "Custom Module to change administrative tasks for the Group Module"
+package = Group
+dependencies[] = group
+dependencies[] = groupcontext
+core = 7.x

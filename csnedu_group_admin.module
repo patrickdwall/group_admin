@@ -1,0 +1,404 @@
+<?php
+/**
+ * @file
+ * This module cleans up the admin for groups.
+ */
+
+ /**
+ * Implements hook_menu().
+ */
+function csnedu_group_admin_menu() {
+  $items['node/%node/group'] = array(
+    'title' => 'Group',
+    'page callback' => 'csnedu_group_admin_tab',
+    'page arguments' => array(1),
+    'theme callback' => 'variable_get',
+    'theme arguments' => array('admin_theme'),
+    'access callback' => 'csnedu_group_admin_tab_access_settings',
+    'access arguments' => array(1),
+    'type' => MENU_LOCAL_TASK,
+    'weight' => 10,
+  );
+
+  $items['group/%group/content'] = array(
+    'title' => 'Content',
+    'page callback' => 'csnedu_group_admin_tab',
+    'page arguments' => array(1),
+    'theme callback' => 'variable_get',
+    'theme arguments' => array('admin_theme'),
+    'access callback' => 'csnedu_group_admin_tab_access_settings',
+    'access arguments' => array(1),
+    'type' => MENU_LOCAL_TASK,
+    'weight' => 10,
+  );
+
+  $items['group/%group/node/add'] = array(
+    'title' => 'Add Group Content',
+    'page callback' => 'csnedu_group_admin_node_add',
+    'page arguments' => array(1),
+    'theme callback' => 'variable_get',
+    'theme arguments' => array('admin_theme'),
+    'access callback' => 'csnedu_group_admin_node_add_access_settings',
+    'access arguments' => array(1),
+    'type' => MENU_NORMAL_ITEM,
+  );
+
+  return $items;
+}
+
+ /**
+ * Implements hook_node_presave().
+ */
+function csnedu_group_admin_node_presave($node) {
+  // auto create / update groups on content type changes
+  // @todo make dynamic with setting
+  if (in_array($node->type, array('program', 'school', 'department'))) {
+    // don't fire on workbench transitions unless being published
+    if (!empty($node->workbench_moderation_state_new)) {
+      $published = workbench_moderation_state_published();
+      if ($node->workbench_moderation_state_new != $published) {
+        return;
+      }
+    }
+
+    // no group attached and it's the right type, make one
+    // @todo make type not have to match node type with setting
+    if (empty($node->group)) {
+      $group = entity_create('group', array(
+        'title' => $node->title,
+        'type' => $node->type,
+      ));
+    }
+    else {
+      $group = entity_load_single('group', $node->group);
+    }
+
+    // update group title
+    $group->title =  $node->title;
+
+    // update parent group if present
+    // @todo make this dynamic off settings or something
+    if (!empty($node->field_school[LANGUAGE_NONE][0]['target_id'])) {
+      $group_node = node_load($node->field_school[LANGUAGE_NONE][0]['target_id']);
+      if (!empty($group_node->group)) {
+        $group->group = $group_node->group;
+      }
+    }
+    if (!empty($node->field_department[LANGUAGE_NONE][0]['target_id'])) {
+      $group_node = node_load($node->field_department[LANGUAGE_NONE][0]['target_id']);
+      if (!empty($group_node->group)) {
+        $group->group = $group_node->group;
+      }
+    }
+    entity_save('group', $group);
+
+    // add this node to group
+    $node->group = $group->gid;
+  }
+}
+
+ /**
+ * Implements hook_workbench_moderation_transition().
+ */
+function csnedu_group_admin_workbench_moderation_transition($node, $previous_state, $new_state) {
+  // ignore entirely unpublished content
+  if (!isset($node->workbench_moderation['published'])) {
+    return;
+  }
+  if (!in_array($node->type, array('program', 'school', 'department'))) {
+    return;
+  }
+
+  // Get the machine name of the published state.
+  $published = workbench_moderation_state_published();
+
+  // run presave code if changing from non-published to published
+  if ($new_state == $published && $previous_state != $published) {
+    // no group attached and it's the right type, make one
+    // @todo make type not have to match node type with setting
+    if (empty($node->group)) {
+      $group = entity_create('group', array(
+        'title' => $node->title,
+        'type' => $node->type,
+      ));
+    }
+    else {
+      $group = entity_load_single('group', $node->group);
+    }
+
+    // update group title
+    $group->title =  $node->title;
+
+    // update parent group if present
+    // @todo make this dynamic off settings or something
+    if (!empty($node->field_school[LANGUAGE_NONE][0]['target_id'])) {
+      $group_node = node_load($node->field_school[LANGUAGE_NONE][0]['target_id']);
+      if (!empty($group_node->group)) {
+        $group->group = $group_node->group;
+      }
+    }
+    if (!empty($node->field_department[LANGUAGE_NONE][0]['target_id'])) {
+      $group_node = node_load($node->field_department[LANGUAGE_NONE][0]['target_id']);
+      if (!empty($group_node->group)) {
+        $group->group = $group_node->group;
+      }
+    }
+    entity_save('group', $group);
+
+    // add this node to group
+    $node->group = $group->gid;
+  }
+}
+
+ /**
+ * Implements hook_node_delete().
+ */
+function csnedu_group_admin_node_delete($node) {
+  // auto delete groups on content type deletion
+  // @todo make dynamic with setting
+  if (in_array($node->type, array('program', 'school', 'department')) && !empty($node->group)) {
+    $group = entity_load_single('group', $node->group);
+
+    if (!empty($group->gid)) {
+      entity_delete('group', $group->gid);
+    }
+  }
+}
+
+/**
+ * Implements hook_menu_local_tasks_alter().
+ *
+ * Adds subgroup creation local tasks to group/%group.
+ */
+function csnedu_group_admin_menu_local_tasks_alter(&$data, $router_item, $root_path) {
+  // Add action links for subgroup creation on group/%group.
+
+  if ($root_path == 'group/%') {
+    $gid = $router_item['original_map'][1];
+    //Hides the action list when viewing a group page
+    $data['actions']['output'] = '';
+  }
+
+}
+
+/**
+ * Admin tab for group nodes.
+ */
+function csnedu_group_admin_tab($node) {
+  $output = array();
+
+  $group = entity_load_single('group', $node->group);
+  if (!empty($group->field_landing_page)) {
+    $landingpage_url = $group->field_landing_page[LANGUAGE_NONE][0]['target_id'];
+  }
+  else {
+    $node = menu_get_object();
+    $landingpage_url = $node->nid;
+  }
+
+  // add content list
+  $output['links']['add'] = array(
+    '#theme' => 'link',
+    '#text' => 'Add Content +',
+    '#path' => 'group/' . $node->group . '/node/add',
+    '#options' => array(
+      'attributes' => array(),
+      'html' => FALSE,
+    ),
+    '#suffix' => '<p></p>',
+  );
+
+  $output['links']['menu'] = array(
+    '#theme' => 'link',
+    '#text' => 'Edit Menu',
+    '#path' => 'group/' . $node->group . '/menus',
+    '#options' => array(
+      'attributes' => array(),
+      'html' => FALSE,
+      'query' => array('destination' => ('node/' . $landingpage_url . '/group')),
+    ),
+    '#suffix' => '<br />',
+  );
+
+  $output['links']['group_edit'] = array(
+    '#theme' => 'link',
+    '#text' => 'Edit Group',
+    '#path' => 'group/' . $node->group . '/edit',
+    '#options' => array(
+      'attributes' => array(),
+      'html' => FALSE,
+      'query' => array('destination' => ('node/' . $landingpage_url . '/group')),
+    ),
+    '#suffix' => '<br />',
+  );
+
+  $output['links']['members'] = array(
+    '#theme' => 'link',
+    '#text' => 'Edit Group Members',
+    '#path' => 'group/' . $node->group . '/member',
+    '#options' => array(
+      'attributes' => array(),
+      'html' => FALSE,
+      'query' => array('destination' => ('node/' . $landingpage_url . '/group')),
+    ),
+    '#suffix' => '<br />',
+  );
+
+  $output['links']['#prefix'] = '<h5>';
+  $output['links']['#suffix'] = '</h5>';
+
+  // list contnet
+  $output['content']['#prefix'] = '<h3>Group Content</h3>';
+  $output['content']['#markup'] = views_embed_view('group_content_nodes', 'group_nodes', $node->group, $node->group);
+
+  // list subgroups if not a 'Program
+  if ($group->type != 'program') {
+    $output['subgroups']['#prefix'] = '<h3>Sub Groups</h3>';
+    $output['subgroups']['#markup'] = views_embed_view('group_content', 'group_content', $node->group, $node->group);
+  }
+
+  return $output;
+}
+
+/**
+ * Group Admin Tab access settings
+ */
+function csnedu_group_admin_tab_access_settings($node) {
+  global $user;
+
+  // block anonymous
+  if (empty($user->uid)) {
+    return FALSE;
+  }
+
+  // block non group nodes
+  if (empty($node->group)) {
+    return FALSE;
+  }
+
+  // limit down to our content displays
+  // @todo make this a setting or field based option
+  if (!in_array($node->type, array('school', 'department', 'program', 'page'))) {
+    return FALSE;
+  }
+
+  // load group for node
+  $group = entity_load_single('group', $node->group);
+
+  // block if fails
+  if (empty($group->gid)) {
+    return FALSE;
+  }
+
+  // do group permission check
+  return $group->userHasPermission($user->uid, 'access member overview');
+}
+
+/**
+ * Group Admin Node Add
+ */
+function csnedu_group_admin_node_add($group) {
+  $content = array();
+
+  $group_type = $group->type;
+
+  foreach (node_type_get_types() as $node_type => $info) {
+    $no_not_show = array('school','department','program','administration');
+    if (!in_array($info->type,$no_not_show)){
+      $item = menu_get_item("group/" . $group->gid . "/node/add/" . $node_type);
+
+
+      if ($item['access']) {
+        $key = (50000 + $item['weight']) . ' ' . drupal_strtolower($item['title']);
+        $content[$key] = $item;
+      }
+    }
+  }
+
+  // Bypass the node/add listing if only one content type is available.
+  if (count($content) == 1) {
+    $item = array_shift($content);
+    drupal_goto($item['href']);
+  }
+
+  ksort($content);
+  switch ($group_type) {
+    case 'school':
+      $add_subgroup_link = '/group/' . $group->gid . '/subgroup/add/department?destination=/group/' . $group->gid . '/node/add';
+      return '<p>' . t('Add Content For %group:', array('%group' => $group->title)) . '</p>' . theme('node_add_list', array('content' => $content)) . '<p><a href=' . $add_subgroup_link . '>Add a sub group</p>';
+    break;
+    case 'department':
+      $add_subgroup_link = '/group/' . $group->gid . '/subgroup/add/program?destination=/group/' . $group->gid . '/node/add';
+      return '<p>' . t('Add Content For %group:', array('%group' => $group->title)) . '</p>' . theme('node_add_list', array('content' => $content)) . '<p><a href=' . $add_subgroup_link . '>Add a sub group</p>';
+    break;
+    case 'administration':
+      $add_subgroup_link = '/group/' . $group->gid . '/subgroup/add/department?destination=/group/' . $group->gid . '/node/add';
+      return '<p>' . t('Add Content For %group:', array('%group' => $group->title)) . '</p>' . theme('node_add_list', array('content' => $content)) . '<p><a href=' . $add_subgroup_link . '>Add a sub group</p>';
+    break;
+    default:
+      $add_subgroup_link = '/group/' . $group->gid . '/subgroup/add/department?destination=/group/' . $group->gid . '/node/add';
+      return '<p>' . t('Add Content For %group:', array('%group' => $group->title)) . '</p>' . theme('node_add_list', array('content' => $content));
+    break;
+  }
+}
+
+/**
+ * Group Admin Node Add access settings
+ */
+function csnedu_group_admin_node_add_access_settings($group) {
+  global $user;
+
+  // block anonymous
+  if (empty($user->uid)) {
+    return FALSE;
+  }
+
+  // block if no group
+  if (empty($group->gid)) {
+    //return FALSE;
+  }
+
+  // do group permission check
+  return $group->userHasPermission($user->uid, 'administer group');
+}
+
+/**
+ * Implements hook_form_alter().
+ *
+ * Remove form elements from group edit page
+ */
+function csnedu_group_admin_form_alter(&$form, &$form_state, $form_id) {
+  if (($form['#form_id'] == 'group_edit_program_form') || ($form['#form_id'] == 'group_edit_school_form') || ($form['#form_id'] == 'group_edit_department_form')) {
+    unset($form['menu']);
+    unset($form['redirect']);
+    unset($form['path']);
+  }
+}
+
+function csnedu_group_admin_entity_view($entity, $type, $view_mode, $langcode) {
+  if ($type == 'group') {
+      if (!empty($entity->field_landing_page)) {
+        $landingpage = $entity->field_landing_page[LANGUAGE_NONE][0]['target_id'];
+        drupal_goto('node/' . $landingpage);
+      }
+    }
+}
+
+/**
+ * Implements hook_pathauto_alias_alter().
+ */
+function csnedu_group_admin_pathauto_alias_alter(&$alias, array &$context) {
+  // @todo make it not be hardcoded
+  if (!empty($context['data']['node']->type) && in_array($context['data']['node']->type, array('department', 'program'))) {
+    $path_alias = '';
+    if (!empty($context['data']['node']->field_school[LANGUAGE_NONE][0]['target_id'])) {
+      $path_alias = drupal_get_path_alias('node/' . $context['data']['node']->field_school[LANGUAGE_NONE][0]['target_id']);
+    }
+    elseif (!empty($context['data']['node']->field_department[LANGUAGE_NONE][0]['target_id'])) {
+      $path_alias = drupal_get_path_alias('node/' . $context['data']['node']->field_department[LANGUAGE_NONE][0]['target_id']);
+    }
+    if (!empty($path_alias)) {
+      $alias = rtrim($path_alias, '/') . '/' . $alias;
+    }
+  }
+}
